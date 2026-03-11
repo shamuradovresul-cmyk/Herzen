@@ -18,15 +18,12 @@ from texts import TEXTS
 
 logger = logging.getLogger(__name__)
 
+# Хранит ключи уже отправленных уведомлений: (user_id, date, time_start)
+# Гарантирует что каждое уведомление отправится ровно 1 раз
+_notified: set = set()
 
-# ─── Безопасная отправка ─────────────────────────────────────────────────────
 
 async def safe_send(bot, user_id: int, text: str, **kwargs) -> bool:
-    """
-    Отправляет сообщение пользователю.
-    Обрабатывает блокировку бота (Forbidden) и превышение лимита (RetryAfter).
-    Возвращает True при успехе.
-    """
     try:
         await bot.send_message(chat_id=user_id, text=text, **kwargs)
         return True
@@ -44,31 +41,47 @@ async def safe_send(bot, user_id: int, text: str, **kwargs) -> bool:
         return False
 
 
-# ─── Уведомления за 30 минут ─────────────────────────────────────────────────
-
 async def job_notify_30min(context: ContextTypes.DEFAULT_TYPE):
-    """Запускается каждую минуту. Отправляет напоминание если до занятия 28–32 минуты."""
+    """
+    Запускается каждую минуту.
+    Отправляет уведомление ровно 1 раз если до занятия 29-31 минута.
+    Ключ (user_id, date, time_start) гарантирует что повтора не будет.
+    """
+    global _notified
     now = datetime.now(TZ)
+
+    # Очищаем вчерашние ключи
+    _notified = {key for key in _notified if key[1] == now.date()}
+
     for row in all_users():
         if not row["notify"] or not row["group_id"]:
             continue
         try:
             schedule = fetch_schedule(row["group_id"], row["sub_group_id"])
             for lesson in get_day_lessons(schedule, now.date()):
+                notify_key = (row["user_id"], lesson["date"], lesson["time_start"])
+
+                # Уже отправляли — пропускаем
+                if notify_key in _notified:
+                    continue
+
                 lesson_dt = datetime.combine(lesson["date"], lesson["time_start"], tzinfo=TZ)
                 diff_min  = (lesson_dt - now).total_seconds() / 60
-                if 28 <= diff_min <= 32:
-                    await safe_send(
+
+                # Узкое окно 2 минуты вместо 4 — срабатывает один раз
+                if 29 <= diff_min <= 31:
+                    sent = await safe_send(
                         context.bot,
                         row["user_id"],
                         t(row["user_id"], "notify_soon") + format_lesson(lesson),
                         parse_mode="HTML",
                     )
+                    if sent:
+                        _notified.add(notify_key)
+
         except Exception as e:
             logger.error(f"job_notify_30min error for {row['user_id']}: {e}")
 
-
-# ─── Вечерняя рассылка ───────────────────────────────────────────────────────
 
 async def job_evening(context: ContextTypes.DEFAULT_TYPE):
     """Запускается ровно в 20:00 МСК. Отправляет расписание на завтра."""
@@ -83,8 +96,8 @@ async def job_evening(context: ContextTypes.DEFAULT_TYPE):
             schedule = fetch_schedule(row["group_id"], row["sub_group_id"])
             lessons  = get_day_lessons(schedule, tomorrow)
 
-            days    = TEXTS[lang]["days"]
-            header  = (
+            days   = TEXTS[lang]["days"]
+            header = (
                 f"🌙 <b>Расписание на завтра:</b>\n"
                 f"📅 <b>{days[tomorrow.weekday()]}, {tomorrow.strftime('%d.%m.%Y')}</b>\n\n"
             )
@@ -99,7 +112,7 @@ async def job_evening(context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
                 reply_markup=site_btn(row["group_id"]),
             )
-            await asyncio.sleep(0.05)  # Защита от flood limit при большой базе
+            await asyncio.sleep(0.05)
 
         except Exception as e:
             logger.error(f"job_evening error for {row['user_id']}: {e}")
