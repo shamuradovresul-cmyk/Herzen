@@ -65,7 +65,7 @@ async def handle_lang_choice(update: Update, uid: int, text: str) -> bool:
         return False
     set_user(uid, lang=LANG_MAP[text])
     if not get_group_id(uid):
-        from handlers.group import show_group_picker
+        from group import show_group_picker
         await update.message.reply_text(t(uid, "ask_group"))
         await show_group_picker(update, uid)
     else:
