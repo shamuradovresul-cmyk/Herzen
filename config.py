@@ -2,7 +2,7 @@ import os
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path="/root/.env")
 
 BOT_TOKEN        = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН_СЮДА")
 TZ               = ZoneInfo("Europe/Moscow")

@@ -108,10 +108,32 @@ def fetch_groups_tree() -> dict | None:
         except (KeyError, TypeError, ValueError) as e:
             logger.debug(f"Пропуск группы: {e}")
 
-    _groups_tree    = tree
+    _groups_tree    = _sort_tree(tree)
     _groups_tree_ts = datetime.now()
     logger.info(f"Дерево групп загружено: {len(groups_data)} групп, {len(tree)} факультетов.")
-    return tree
+    return _groups_tree
+
+
+def _sort_tree(tree: dict) -> dict:
+    """Сортирует дерево групп: факультеты и формы — по алфавиту, курсы — по номеру."""
+    result = {}
+    for fac in sorted(tree.keys()):
+        result[fac] = {}
+        for form in sorted(tree[fac].keys()):
+            result[fac][form] = {}
+            for level in sorted(tree[fac][form].keys()):
+                result[fac][form][level] = {}
+                # Курсы сортируем числом (1, 2, 3...), остальное — по алфавиту
+                courses = sorted(
+                    tree[fac][form][level].keys(),
+                    key=lambda c: int(c) if c.isdigit() else c
+                )
+                for course in courses:
+                    # Группы внутри курса — по алфавиту
+                    result[fac][form][level][course] = dict(
+                        sorted(tree[fac][form][level][course].items())
+                    )
+    return result
 
 
 def find_sub_groups(group_id: str) -> list[dict]:
